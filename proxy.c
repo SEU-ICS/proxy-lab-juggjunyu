@@ -60,9 +60,9 @@ void cache_insert(char *uri, char *data, int len)
         return;
     pthread_mutex_lock(&cache.lock);
 
+    //LRU
     while (cache.n + len > MAX_CACHE_SIZE) 
     {
-        // Remove the least recently used block
         cache_block *block = cache.head;
         cache.head = block->next;
         cache.n -= block->len;
@@ -86,11 +86,6 @@ void *thread(void *varg);
 void doit(int fd);
 void read_requesthdrs(rio_t *rp);
 int parse_uri(char *uri, char *hostname, char *port, char *path);
-void serve_static(int fd, char *filename, int filesize);
-void get_filetype(char *filename, char *filetype);
-void serve_dynamic(int fd, char *filename, char *cgiargs);
-void clienterror(int fd, char *cause, char *errnum, 
-		 char *shortmsg, char *longmsg);
 
 int main(int argc, char **argv)
 {
@@ -130,7 +125,7 @@ void *thread(void *varg)
 {
     int connfd = *( (int *) varg);
     Pthread_detach(pthread_self());
-    //free(varg);
+
     sem_wait(&mutex);
     doit(connfd);
     sem_post(&mutex);
@@ -175,7 +170,7 @@ void doit(int fd)
         printf("Cannot parse uri.\n");
         return;
     }
-    //构建server的请求头
+    
     
     snprintf(server, sizeof(server), "%s %s %s\r\n", method, path, version);
     snprintf(server + strlen(server), sizeof(server) - strlen(server), "Host: %s\r\n", hostname);
