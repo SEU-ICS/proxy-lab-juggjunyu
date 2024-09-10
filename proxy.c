@@ -41,7 +41,7 @@ int main(int argc, char **argv)
         
     pthread_t tid;
 
-    sem_init(&mutex, 0, 1);
+    sem_init(&mutex, 0, 2);
 
     while (1) 
     {
