@@ -13,78 +13,8 @@ static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 (X11; Linux x86_64;
 
 sem_t mutex;
 
-typedef struct cache_block
-{
-    char uri[MAXLINE+5];
-    char data[MAX_OBJECT_SIZE];
-    int len;
-    struct cache_block *next;
-} cache_block;
-
-typedef struct list
-{
-    cache_block *head;
-    int n;
-    pthread_mutex_t lock;
-} list;
-
-list cache;
-
-void init()
-{
-    cache.head = NULL;
-    cache.n = 0;
-    pthread_mutex_init(&cache.lock, NULL);
-}
-
-cache_block *find(char *uri)
-{
-    pthread_mutex_lock(&cache.lock);
-    cache_block *p = cache.head;
-    while(p!=NULL)
-    {
-        if(strcmp(p->uri, uri)==0)
-        {
-            pthread_mutex_unlock(&cache.lock);
-            return p;
-        }
-        p = p->next;
-    }
-    pthread_mutex_unlock(&cache.lock);
-    return NULL;
-}
-
-void cache_insert(char *uri, char *data, int len)
-{
-    if(len>MAX_OBJECT_SIZE)
-        return;
-    pthread_mutex_lock(&cache.lock);
-
-    //LRU
-    while (cache.n + len > MAX_CACHE_SIZE) 
-    {
-        cache_block *block = cache.head;
-        cache.head = block->next;
-        cache.n -= block->len;
-        free(block);
-    }
-
-    cache_block *p=(cache_block *)malloc(sizeof(cache_block));
-    strcpy(p->uri, uri);    
-    memcpy(p->data, data, len);
-    p->len = len;
-    p->next = cache.head;
-    cache.head = p;
-    cache.n += len;
-
-    pthread_mutex_unlock(&cache.lock);
-
-    return;
-}
-
 void *thread(void *varg);
 void doit(int fd);
-void read_requesthdrs(rio_t *rp);
 int parse_uri(char *uri, char *hostname, char *port, char *path);
 
 int main(int argc, char **argv)
@@ -105,8 +35,7 @@ int main(int argc, char **argv)
         
     pthread_t tid;
 
-    init();
-    sem_init(&mutex, 0, MAX_THREADS);
+    sem_init(&mutex, 0, 1);
 
     while (1) 
     {
@@ -125,6 +54,7 @@ void *thread(void *varg)
 {
     int connfd = *( (int *) varg);
     Pthread_detach(pthread_self());
+    //free(varg);
 
     sem_wait(&mutex);
     doit(connfd);
@@ -150,18 +80,12 @@ void doit(int fd)
         return;
     printf("%s", buf);
     sscanf(buf, "%s %s %s", method, uri, version);       //line:netp:doit:parserequest
-    if (strcasecmp(method, "GET")) {                     //line:netp:doit:beginrequesterr
+    if (strcasecmp(method, "GET")) 
+    {                     //line:netp:doit:beginrequesterr
         printf("Proxy does not implement this method\r\n");
         return;
     }                                                    //line:netp:doit:endrequesterr
     //read_requesthdrs(&rio);                              //line:netp:doit:readrequesthdrs
-
-    cache_block *block = find(uri);
-    if(block!=NULL)
-    {
-        Rio_writen(fd, block->data, block->len);
-        return;
-    }
 
     /* Parse URI from GET request */
     int ok = parse_uri(uri, hostname, port, path);       //line:netp:doit:staticcheck
@@ -170,7 +94,7 @@ void doit(int fd)
         printf("Cannot parse uri.\n");
         return;
     }
-    
+    //构建server的请求头
     
     snprintf(server, sizeof(server), "%s %s %s\r\n", method, path, version);
     snprintf(server + strlen(server), sizeof(server) - strlen(server), "Host: %s\r\n", hostname);
@@ -191,33 +115,25 @@ void doit(int fd)
     Rio_writen(serverfd, server, strlen(server));
 
     size_t n;
-    size_t len=0;
-    char content[MAX_OBJECT_SIZE];
     while ((n = Rio_readlineb(&serrio, buf, MAXLINE)) != 0)
     {
         printf("proxy received %d bytes,then send\n", (int)n);
         Rio_writen(fd, buf, n);
-        if(len + n < MAX_OBJECT_SIZE)
-        {
-            memcpy(content + len, buf, n);
-            len += n;
-        }
     }
     Close(serverfd);
-    cache_insert(uri, content, len);
 }
 
-int parse_uri(char *uri, char *hostname, char *port, char *path) {
+int parse_uri(char *uri, char *hostname, char *port, char *path) 
+{
     char *hostbegin;
     char *hostend;
     char *pathbegin;
     int len;
 
-    if (strncasecmp(uri, "http://", 7) == 0) {
+    if (strncasecmp(uri, "http://", 7) == 0)
         uri += 7;
-    } else {
+    else 
         return -1;
-    }
 
     hostbegin = uri;
     hostend = strpbrk(hostbegin, " :/\r\n\0");
@@ -225,22 +141,22 @@ int parse_uri(char *uri, char *hostname, char *port, char *path) {
     strncpy(hostname, hostbegin, len);
     hostname[len] = '\0';
 
-    if (*hostend == ':') {
+    if (*hostend == ':') 
+    {
         char *portbegin = hostend + 1;
         char *portend = strpbrk(portbegin, "/\r\n\0");
         len = portend - portbegin;
         strncpy(port, portbegin, len);
         port[len] = '\0';
-    } else {
+    } 
+    else 
         strcpy(port, "80");
-    }
 
     pathbegin = strchr(hostend, '/');
-    if (pathbegin) {
+    if (pathbegin)
         strcpy(path, pathbegin);
-    } else {
+    else 
         path[0] = '\0';
-    }
 
     return 0;
 }
